@@ -10,7 +10,9 @@ ENV/
 env.bak/
 venv.bak/
 .venv
-
+scripts/
+docker-compose.yml
+docker-compose.yml.backup
 # Django
 *.log
 local_settings.py

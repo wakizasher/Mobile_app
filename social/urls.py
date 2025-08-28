@@ -8,15 +8,103 @@ from .views import (
     SocialStatsView,
     ReviewSentimentAnalysisView,
     GenerateSocialPostView,
+    FriendRequestListCreateView,
+    FriendRequestUpdateView,
+    FriendshipListView,
+    MovieNightListCreateView,
+    MovieNightDetailView,
+    MovieNightParticipantView,
+    MovieNightVoteView,
+    FriendSuggestionsView,
+    UsersByGenreView,
 )
 
 urlpatterns = [
-    path("favorites/", FavoriteListCreateView.as_view(), name="favorite_list_create"),
-    path("favorites/<str:imdb_id>/", FavoriteDeleteView.as_view(), name="favorite_delete"),
-    path("likes/toggle/", LikeToggleView.as_view(), name="like_toggle"),
-    path("shares/", ShareCreateView.as_view(), name="share_create"),
-    path("reviews/", ReviewListCreateView.as_view(), name="review_list_create"),
-    path("stats/<str:imdb_id>/", SocialStatsView.as_view(), name="social_stats"),
-    path("sentiment-analysis/<int:review_id>/", ReviewSentimentAnalysisView.as_view(), name="review_sentiment_analysis"),
-    path("generate-post/", GenerateSocialPostView.as_view(), name="generate_social_post"),
+    path(
+        "favorites/",
+        FavoriteListCreateView.as_view(),
+        name="favorite_list_create",
+    ),
+    path(
+        "favorites/<str:imdb_id>/",
+        FavoriteDeleteView.as_view(),
+        name="favorite_delete",
+    ),
+    path(
+        "likes/toggle/",
+        LikeToggleView.as_view(),
+        name="like_toggle",
+    ),
+    path(
+        "shares/",
+        ShareCreateView.as_view(),
+        name="share_create",
+    ),
+    path(
+        "reviews/",
+        ReviewListCreateView.as_view(),
+        name="review_list_create",
+    ),
+    path(
+        "stats/<str:imdb_id>/",
+        SocialStatsView.as_view(),
+        name="social_stats",
+    ),
+    path(
+        "sentiment-analysis/<int:review_id>/",
+        ReviewSentimentAnalysisView.as_view(),
+        name="review_sentiment_analysis",
+    ),
+    path(
+        "generate-post/",
+        GenerateSocialPostView.as_view(),
+        name="generate_social_post",
+    ),
+    # Friend system
+    path(
+        "friends/",
+        FriendshipListView.as_view(),
+        name="friendship_list",
+    ),
+    path(
+        "friend-requests/",
+        FriendRequestListCreateView.as_view(),
+        name="friend_request_list_create",
+    ),
+    path(
+        "friend-requests/<int:pk>/",
+        FriendRequestUpdateView.as_view(),
+        name="friend_request_update",
+    ),
+    # Movie nights
+    path(
+        "movie-nights/",
+        MovieNightListCreateView.as_view(),
+        name="movie_night_list_create",
+    ),
+    path(
+        "movie-nights/<int:pk>/",
+        MovieNightDetailView.as_view(),
+        name="movie_night_detail",
+    ),
+    path(
+        "movie-nights/<int:pk>/join/",
+        MovieNightParticipantView.as_view(),
+        name="movie_night_join",
+    ),
+    path(
+        "movie-nights/<int:pk>/vote/",
+        MovieNightVoteView.as_view(),
+        name="movie_night_vote",
+    ),
+    path(
+        "friend-suggestions/",
+        FriendSuggestionsView.as_view(),
+        name="friend_suggestions",
+    ),
+    path(
+        "users-by-genre/",
+        UsersByGenreView.as_view(),
+        name="users_by_genre",
+    ),
 ]
