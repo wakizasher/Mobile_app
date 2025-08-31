@@ -6,6 +6,7 @@ APIs built with Django REST Framework (DRF) using class-based views.
 """
 from pathlib import Path
 import datetime
+import warnings
 import environ
 
 # Base directory
@@ -21,6 +22,7 @@ env = environ.Env(
     OMDB_API_KEY=(str, ""),
     GEMINI_API_KEY=(str, ""),
     FCM_SERVER_KEY=(str, ""),
+    N8N_SHARED_SECRET=(str, ""),
     POSTGRES_DB=(str, ""),
     POSTGRES_USER=(str, ""),
     POSTGRES_PASSWORD=(str, ""),
@@ -59,6 +61,8 @@ INSTALLED_APPS = [
     "social",
     "notifications",
     "ai",
+    "analytics",
+    "moderation",
 ]
 
 MIDDLEWARE = [
@@ -116,10 +120,31 @@ else:
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
-    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator", "OPTIONS": {"min_length": 8}},
-    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
-    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+    {
+        "NAME": (
+            "django.contrib.auth.password_validation."
+            "UserAttributeSimilarityValidator"
+        )
+    },
+    {
+        "NAME": (
+            "django.contrib.auth.password_validation."
+            "MinimumLengthValidator"
+        ),
+        "OPTIONS": {"min_length": 8},
+    },
+    {
+        "NAME": (
+            "django.contrib.auth.password_validation."
+            "CommonPasswordValidator"
+        )
+    },
+    {
+        "NAME": (
+            "django.contrib.auth.password_validation."
+            "NumericPasswordValidator"
+        )
+    },
 ]
 
 # Internationalization
@@ -146,9 +171,13 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
     ),
-    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "DEFAULT_PAGINATION_CLASS": (
+        "rest_framework.pagination.PageNumberPagination"
+    ),
     "PAGE_SIZE": 20,
-    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_SCHEMA_CLASS": (
+        "drf_spectacular.openapi.AutoSchema"
+    ),
     "DEFAULT_FILTER_BACKENDS": (
         "django_filters.rest_framework.DjangoFilterBackend",
         "rest_framework.filters.SearchFilter",
@@ -175,7 +204,10 @@ SIMPLE_JWT = {
 # drf-spectacular
 SPECTACULAR_SETTINGS = {
     "TITLE": "Movie Social API",
-    "DESCRIPTION": "Backend API for a movie social application with movies, favorites, likes, reviews, and notifications.",
+    "DESCRIPTION": (
+        "Backend API for a movie social application with movies, favorites, "
+        "likes, reviews, and notifications."
+    ),
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
 }
@@ -189,6 +221,9 @@ CORS_ALLOW_CREDENTIALS = True
 OMDB_API_KEY = env("OMDB_API_KEY")
 GEMINI_API_KEY = env("GEMINI_API_KEY")
 FCM_SERVER_KEY = env("FCM_SERVER_KEY")
+N8N_SHARED_SECRET = env("N8N_SHARED_SECRET") or None
+if not N8N_SHARED_SECRET:
+    warnings.warn("N8N_SHARED_SECRET not configured")
 
 # Caching (used for LLM results and other computed resources)
 CACHES = {

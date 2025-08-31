@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict
+import logging
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
@@ -9,6 +10,11 @@ from rest_framework.views import APIView
 from social.models import Favorite, Like, Review
 from notifications.services import gemini_generate_recommendations
 from notifications.services import gemini_healthcheck
+from movies.models import Movie
+from movies.services import get_movie_details, map_omdb_to_fields
+
+
+logger = logging.getLogger(__name__)
 
 
 class RecommendationsView(APIView):
@@ -76,6 +82,43 @@ class RecommendationsView(APIView):
             user_id=user.id,
             context=context,
         )
+        # Best-effort upsert of recommended movies by imdb_id to avoid
+        # downstream errors when movie records are missing in DB.
+        try:
+            if isinstance(recos, list):
+                for item in recos:
+                    try:
+                        imdb_id = (item.get("imdb_id") or "").strip()
+                        if not imdb_id:
+                            continue
+                        exists = Movie.objects.filter(imdb_id=imdb_id).exists()
+                        if not exists:
+                            payload = get_movie_details(imdb_id)
+                            if payload and payload.get("Response") != "False":
+                                fields = map_omdb_to_fields(payload)
+                                Movie.objects.create(**fields)
+                                logger.debug(
+                                    "reco_upsert: created id=%s "
+                                    "title=%s",
+                                    imdb_id,
+                                    fields.get("title"),
+                                )
+                            else:
+                                logger.debug(
+                                    "reco_upsert: OMDb fail id=%s",
+                                    imdb_id,
+                                )
+                    except Exception:
+                        imdb_val = None
+                        if isinstance(item, dict):
+                            imdb_val = item.get("imdb_id")
+                        logger.exception(
+                            "reco_upsert: failed imdb_id=%s",
+                            imdb_val,
+                        )
+        except Exception:
+            # Never fail the endpoint due to upsert attempts
+            logger.exception("reco_upsert: outer failure")
         return Response(recos)
 
 
