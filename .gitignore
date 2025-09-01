@@ -7,6 +7,7 @@ __pycache__/
 env/
 venv/
 ENV/
+ENV.md
 env.bak/
 venv.bak/
 .venv
@@ -35,4 +36,6 @@ migrations/
 Thumbs.db
 
 # Migrations (optional - you might want to include these)
-# */migrations/0*.py
+# */migrations/0*.pyENV.md
+.env*
+*.env
