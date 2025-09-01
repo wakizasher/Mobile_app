@@ -3,6 +3,7 @@ from .views import (
     NotificationListView,
     NotificationGenerateView,
     NotificationBulkCreateView,
+    NotificationBulkPushView,
 )
 
 urlpatterns = [
@@ -16,5 +17,10 @@ urlpatterns = [
         "bulk-create/",
         NotificationBulkCreateView.as_view(),
         name="notification_bulk_create",
+    ),
+    path(
+        "bulk-push/",
+        NotificationBulkPushView.as_view(),
+        name="notification_bulk_push",
     ),
 ]

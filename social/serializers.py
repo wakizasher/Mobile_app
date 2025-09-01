@@ -50,6 +50,18 @@ class FavoriteSimpleSerializer(serializers.ModelSerializer):
         fields = ["id", "movie_id", "created_at"]
 
 
+class FavoriteWithUserSerializer(serializers.ModelSerializer):
+    """Read-only serializer including both user and movie for feed/activity."""
+
+    user = UserSerializer(read_only=True)
+    movie = MovieSerializer(read_only=True)
+
+    class Meta:
+        model = Favorite
+        fields = ["id", "user", "movie", "created_at"]
+        read_only_fields = fields
+
+
 class LikeToggleSerializer(serializers.Serializer):
     imdb_id = serializers.CharField()
 
@@ -68,7 +80,28 @@ class LikeToggleSerializer(serializers.Serializer):
         return {"liked": True}
 
 
+class LikeSimpleSerializer(serializers.ModelSerializer):
+    """Compact like representation for history/activity payloads."""
+
+    class Meta:
+        model = Like
+        fields = ["id", "movie_id", "created_at"]
+
+
+class LikeWithUserSerializer(serializers.ModelSerializer):
+    """Read-only like with user and movie included for activity feeds."""
+
+    user = UserSerializer(read_only=True)
+    movie = MovieSerializer(read_only=True)
+
+    class Meta:
+        model = Like
+        fields = ["id", "user", "movie", "created_at"]
+        read_only_fields = fields
+
+
 class ReviewSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
     imdb_id = serializers.CharField(write_only=True)
 
     class Meta:
@@ -76,6 +109,7 @@ class ReviewSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "imdb_id",
+            "user",
             "content",
             "rating",
             "sentiment",
@@ -84,7 +118,15 @@ class ReviewSerializer(serializers.ModelSerializer):
             "sentiment_breakdown",
             "created_at",
         ]
-        read_only_fields = ["id", "sentiment", "sentiment_confidence", "emotions", "sentiment_breakdown", "created_at"]
+        read_only_fields = [
+            "id",
+            "user",
+            "sentiment",
+            "sentiment_confidence",
+            "emotions",
+            "sentiment_breakdown",
+            "created_at",
+        ]
 
     def create(self, validated_data):
         from notifications.services import gemini_analyze_sentiment, gemini_advanced_sentiment
@@ -110,6 +152,27 @@ class ReviewSerializer(serializers.ModelSerializer):
                 **validated_data,
             )
         return review
+
+
+class ReviewActivitySerializer(serializers.ModelSerializer):
+    """Review payload for feeds including author and movie minimal info."""
+
+    user = UserSerializer(read_only=True)
+    movie = MovieSerializer(read_only=True)
+
+    class Meta:
+        model = Review
+        fields = [
+            "id",
+            "user",
+            "movie",
+            "content",
+            "rating",
+            "sentiment",
+            "sentiment_confidence",
+            "created_at",
+        ]
+        read_only_fields = fields
 
 
 class ShareSerializer(serializers.ModelSerializer):
@@ -142,6 +205,37 @@ class SocialPostGenerateSerializer(serializers.Serializer):
 
     imdb_id = serializers.CharField()
     preferences = serializers.JSONField(required=False)
+
+
+class TrendingUsersInputSerializer(serializers.Serializer):
+    """Input schema for identifying users interested in trending movies.
+
+    Accepts either a list of IMDB IDs or an array of objects with imdb_id.
+    """
+
+    imdb_ids = serializers.ListField(
+        child=serializers.CharField(), required=False, allow_empty=True
+    )
+    trending = serializers.ListField(
+        child=serializers.DictField(), required=False, allow_empty=True
+    )
+
+    def get_imdb_ids(self) -> list[str]:
+        data = self.validated_data
+        ids = list(data.get("imdb_ids") or [])
+        for item in data.get("trending") or []:
+            if isinstance(item, dict):
+                val = item.get("imdb_id") or item.get("imdbId") or item.get("id")
+                if isinstance(val, str):
+                    ids.append(val)
+        # de-duplicate while preserving order
+        seen = set()
+        out: list[str] = []
+        for x in ids:
+            if x not in seen:
+                seen.add(x)
+                out.append(x)
+        return out
 
 
 # --- Friend System Serializers ---
@@ -246,6 +340,7 @@ class MovieNightVoteSerializer(serializers.ModelSerializer):
 class MovieNightSerializer(serializers.ModelSerializer):
     organizer = UserSerializer(read_only=True)
     participants = MovieNightParticipantSerializer(many=True, read_only=True)
+    votes = MovieNightVoteSerializer(many=True, read_only=True)
 
     class Meta:
         model = MovieNight
@@ -259,10 +354,11 @@ class MovieNightSerializer(serializers.ModelSerializer):
             "status",
             "max_participants",
             "participants",
+            "votes",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "organizer", "status", "participants", "created_at", "updated_at"]
+        read_only_fields = ["id", "organizer", "status", "participants", "votes", "created_at", "updated_at"]
 
     def create(self, validated_data: dict[str, Any]):
         request = self.context["request"]
@@ -274,6 +370,13 @@ class MovieNightSerializer(serializers.ModelSerializer):
             defaults={"status": MovieNightParticipant.STATUS_ACCEPTED},
         )
         return mn
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        include_votes = bool(self.context.get("include_votes", False))
+        if not include_votes:
+            data.pop("votes", None)
+        return data
 
 
 class FriendSuggestionSerializer(serializers.ModelSerializer):

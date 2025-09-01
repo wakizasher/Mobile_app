@@ -19,6 +19,31 @@ class NotificationGenerateSerializer(serializers.Serializer):
     data = serializers.JSONField(required=False)
 
 
+class NotificationBulkPushRecipientSerializer(serializers.Serializer):
+    """Single recipient payload for bulk push."""
+
+    user_id = serializers.IntegerField(min_value=1)
+    device_token = serializers.CharField()
+
+
+class NotificationBulkPushSerializer(serializers.Serializer):
+    """Input schema for bulk push notifications.
+
+    Fields:
+    - recipients: list of {user_id, device_token}
+    - title: notification title
+    - body: notification body
+    - data: optional JSON payload attached to the notification
+    """
+
+    recipients = serializers.ListField(
+        child=NotificationBulkPushRecipientSerializer(), allow_empty=False
+    )
+    title = serializers.CharField()
+    body = serializers.CharField()
+    data = serializers.JSONField(required=False)
+
+
 class NotificationBulkCreateSerializer(serializers.Serializer):
     """Input schema for bulk creating notifications.
 

@@ -3,7 +3,8 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:sqflite/sqflite.dart' show Database, ConflictAlgorithm, openDatabase, databaseFactory;
+import 'package:sqflite_common_ffi/sqflite_ffi.dart' show sqfliteFfiInit, databaseFactoryFfi;
 
 /// SQLite initialization with FFI for desktop.
 class LocalDatabase {

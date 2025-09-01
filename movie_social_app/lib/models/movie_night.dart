@@ -1,5 +1,6 @@
 import 'user.dart';
 import 'movie_night_participant.dart';
+import 'movie_night_vote.dart';
 
 class MovieNight {
   final int id;
@@ -11,6 +12,7 @@ class MovieNight {
   final String status;
   final int? maxParticipants;
   final List<MovieNightParticipant> participants;
+  final List<MovieNightVote> votes;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -24,6 +26,7 @@ class MovieNight {
     required this.status,
     this.maxParticipants,
     required this.participants,
+    required this.votes,
     this.createdAt,
     this.updatedAt,
   });
@@ -41,6 +44,9 @@ class MovieNight {
       participants: ((json['participants'] as List?) ?? const [])
           .map((e) => MovieNightParticipant.fromJson(e as Map<String, dynamic>))
           .toList(),
+      votes: ((json['votes'] as List?) ?? const [])
+          .map((e) => MovieNightVote.fromJson(e as Map<String, dynamic>))
+          .toList(),
       createdAt: _parseDateTime(json['created_at']),
       updatedAt: _parseDateTime(json['updated_at']),
     );
@@ -56,6 +62,7 @@ class MovieNight {
         'status': status,
         'max_participants': maxParticipants,
         'participants': participants.map((e) => e.toJson()).toList(),
+        'votes': votes.map((e) => e.toJson()).toList(),
         'created_at': createdAt?.toIso8601String(),
         'updated_at': updatedAt?.toIso8601String(),
       };
@@ -66,3 +73,4 @@ DateTime? _parseDateTime(dynamic v) {
   if (v is String && v.isNotEmpty) return DateTime.tryParse(v);
   return null;
 }
+

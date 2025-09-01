@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:dio/dio.dart';
 import '../core/constants/endpoints.dart';
 import '../core/constants/env.dart';
 import '../core/network/dio_client.dart';
@@ -100,13 +101,6 @@ class SocialService {
       'content': content,
       if (rating != null) 'rating': rating,
     });
-    _postN8nEvent({
-      'event': 'review_submitted',
-      'imdb_id': imdbId,
-      'rating': rating,
-      'content': content,
-      'ts': DateTime.now().toIso8601String(),
-    });
   }
 
   // --- Friends ---
@@ -149,16 +143,15 @@ class SocialService {
   }
 
   // --- AI Social Post Generation ---
-  // Returns map with keys: twitter, instagram, facebook
   Future<Map<String, String>> generateSocialPost({
     required String imdbId,
     Map<String, dynamic>? preferences,
   }) async {
-    final payload = {
+    final payload = <String, dynamic>{
       'imdb_id': imdbId,
       if (preferences != null) 'preferences': preferences,
     };
-    final res = await client.dio.post(Endpoints.generateSocialPost, data: payload);
+    final res = await client.dio.post(Endpoints.socialGenerate, data: payload);
     final data = res.data;
     if (data is Map<String, dynamic>) {
       return {
@@ -167,7 +160,11 @@ class SocialService {
         'facebook': (data['facebook'] ?? '').toString(),
       };
     }
-    return const {'twitter': '', 'instagram': '', 'facebook': ''};
+    return const {
+      'twitter': '',
+      'instagram': '',
+      'facebook': '',
+    };
   }
 
   // --- Shares ---
@@ -243,7 +240,13 @@ class SocialService {
   }
 
   Future<void> leaveMovieNight(int id) async {
-    await client.dio.delete(Endpoints.movieNightJoin(id));
+    await client.dio.delete(
+      Endpoints.movieNightJoin(id),
+      options: Options(
+        // Consider 404 as success: already not participating
+        validateStatus: (code) => code != null && ((code >= 200 && code < 300) || code == 404),
+      ),
+    );
   }
 
   Future<void> voteMovieNight({required int id, required String imdbId}) async {
@@ -251,5 +254,19 @@ class SocialService {
       // Backend expects 'movie_imdb_id' per MovieNightVoteSerializer
       'movie_imdb_id': imdbId,
     });
+  }
+
+  Future<MovieNightParticipant> inviteToMovieNight({required int id, required int userId}) async {
+    final res = await client.dio.post(Endpoints.movieNightInvite(id), data: {
+      'user_id': userId,
+    });
+    final participant = MovieNightParticipant.fromJson(res.data as Map<String, dynamic>);
+    _postN8nEvent({
+      'event': 'movie_night_invited',
+      'night_id': id,
+      'user_id': userId,
+      'ts': DateTime.now().toIso8601String(),
+    });
+    return participant;
   }
 }

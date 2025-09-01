@@ -92,7 +92,31 @@ class MovieNightsProvider extends ChangeNotifier {
     notifyListeners();
     try {
       await _social.leaveMovieNight(id);
-      await refreshDetail(id);
+      // Remove the night from the in-memory list once the user leaves
+      nights.removeWhere((n) => n.id == id);
+      notifyListeners();
+    } on DioException catch (e) {
+      final status = e.response?.statusCode ?? 0;
+      // Treat 404 (not participating), 200 or 204 (no content) as success
+      if (status == 404 || status == 200 || status == 204) {
+        nights.removeWhere((n) => n.id == id);
+        notifyListeners();
+        return;
+      }
+      if (status == 403) {
+        // Friendly error: organizer cannot leave
+        String message = 'Organizer cannot leave their own movie night.';
+        final data = e.response?.data;
+        if (data is Map<String, dynamic>) {
+          final d = data['detail'];
+          if (d is String && d.isNotEmpty) message = d;
+        }
+        error = message;
+        notifyListeners();
+        return;
+      }
+      error = e.message ?? 'Failed to leave movie night';
+      notifyListeners();
     } catch (e) {
       error = e.toString();
       notifyListeners();
@@ -107,12 +131,24 @@ class MovieNightsProvider extends ChangeNotifier {
     try {
       await _social.voteMovieNight(id: id, imdbId: imdbId);
       await refreshDetail(id);
-    } catch (e) {
+    } on DioException catch (e) {
+      // Friendly message on permission errors
+      final status = e.response?.statusCode ?? 0;
+      if (status == 403) {
+        String? serverDetail;
+        final data = e.response?.data;
+        if (data is Map<String, dynamic>) {
+          final d = data['detail'];
+          if (d is String) serverDetail = d;
+        }
+        error = serverDetail ?? 'You must accept the invitation before voting.';
+        notifyListeners();
+        return;
+      }
       // Retry once on transient timeouts
-      if (e is DioException &&
-          (e.type == DioExceptionType.connectionTimeout ||
-              e.type == DioExceptionType.receiveTimeout ||
-              e.type == DioExceptionType.sendTimeout)) {
+      if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.sendTimeout) {
         try {
           await Future.delayed(const Duration(milliseconds: 350));
           await _social.voteMovieNight(id: id, imdbId: imdbId);
@@ -120,8 +156,24 @@ class MovieNightsProvider extends ChangeNotifier {
           return;
         } catch (_) {}
       }
+      error = e.message ?? 'Failed to submit vote';
+      notifyListeners();
+    } catch (e) {
       error = e.toString();
       notifyListeners();
+    }
+  }
+
+  Future<bool> invite({required int id, required int userId}) async {
+    error = null;
+    try {
+      await _social.inviteToMovieNight(id: id, userId: userId);
+      await refreshDetail(id);
+      return true;
+    } catch (e) {
+      error = e.toString();
+      notifyListeners();
+      return false;
     }
   }
 }

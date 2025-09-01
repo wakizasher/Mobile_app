@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
-import 'package:flutter/services.dart';
 
 import '../../providers/auth_provider.dart';
 import '../../providers/favorites_provider.dart';
@@ -10,7 +9,6 @@ import '../../providers/friends_provider.dart';
 import '../../providers/friend_requests_provider.dart';
 import '../../providers/user_search_provider.dart';
 import '../../providers/recommendations_provider.dart';
-import '../../providers/social_post_provider.dart';
 import '../../models/user.dart';
 import '../../models/friend_request.dart';
 
@@ -134,12 +132,6 @@ class ProfileScreen extends StatelessWidget {
                 _MovieGrid(
                   posters: recs.items.map((m) => m.poster ?? '').toList(),
                 ),
-
-              const SizedBox(height: 32),
-              // AI Social Post Generator
-              Text('Create AI Social Post', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              const _SocialPostGenerator(),
 
               const SizedBox(height: 24),
               Align(
@@ -538,115 +530,7 @@ class _SocialPostGeneratorState extends State<_SocialPostGenerator> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final color = theme.colorScheme;
-    final favProvider = context.watch<FavoritesProvider>();
-    final postProvider = context.watch<SocialPostProvider>();
-    final favs = favProvider.favorites;
-
-    if (favs.isEmpty) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Text(
-            'Add some favorites to generate a social post about them.',
-            style: theme.textTheme.bodyMedium,
-          ),
-        ),
-      );
-    }
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            DropdownButtonFormField<String>(
-              initialValue: _selectedImdbId,
-              items: [
-                for (final f in favs)
-                  DropdownMenuItem(
-                    value: f.movie.imdbId,
-                    child: Text((f.movie.title ?? f.movie.imdbId) + (f.movie.year != null ? ' (${f.movie.year})' : '')),
-                  ),
-              ],
-              onChanged: postProvider.loading ? null : (v) => setState(() => _selectedImdbId = v),
-              decoration: const InputDecoration(labelText: 'Movie'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _promptController,
-              maxLines: 3,
-              decoration: const InputDecoration(
-                labelText: 'Optional prompt (tone, style, hashtags...)',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                FilledButton.icon(
-                  onPressed: (postProvider.loading || _selectedImdbId == null)
-                      ? null
-                      : () async {
-                          final messenger = ScaffoldMessenger.of(context);
-                          await context
-                              .read<SocialPostProvider>()
-                              .generate(
-                                  imdbId: _selectedImdbId!,
-                                  preferences: _promptController.text.trim().isEmpty
-                                      ? null
-                                      : {'style': _promptController.text.trim()});
-                          if (postProvider.error == null) {
-                            messenger.showSnackBar(const SnackBar(content: Text('Post generated')));
-                          }
-                        },
-                  icon: const Icon(Icons.auto_awesome),
-                  label: const Text('Generate'),
-                ),
-                const SizedBox(width: 12),
-                if (postProvider.loading)
-                  const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-              ],
-            ),
-            if (postProvider.error != null) ...[
-              const SizedBox(height: 8),
-              Text(postProvider.error!, style: theme.textTheme.bodyMedium?.copyWith(color: color.error)),
-            ],
-            if (postProvider.currentText.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Result', style: theme.textTheme.titleSmall),
-                  IconButton(
-                    tooltip: 'Copy',
-                    icon: const Icon(Icons.copy),
-                    onPressed: () async {
-                      final messenger = ScaffoldMessenger.of(context);
-                      await Clipboard.setData(ClipboardData(text: postProvider.currentText));
-                      messenger.showSnackBar(const SnackBar(content: Text('Copied')));
-                    },
-                  ),
-                ],
-              ),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: color.surfaceContainerHighest.withValues(alpha: 0.6),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: SelectableText(
-                  postProvider.currentText,
-                  style: theme.textTheme.bodyMedium,
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
+    // Feature removed: AI Social Post Generator
+    return const SizedBox.shrink();
   }
 }

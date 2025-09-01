@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'core/constants/env.dart';
 
 // STEP 4 wiring: Providers, Router, Services
 import 'package:provider/provider.dart';
@@ -20,9 +21,10 @@ import 'providers/friends_provider.dart';
 import 'providers/friend_requests_provider.dart';
 import 'providers/recommendations_provider.dart';
 import 'providers/social_stats_provider.dart';
-import 'providers/social_post_provider.dart';
+import 'providers/reviews_provider.dart';
 import 'providers/user_search_provider.dart';
 import 'providers/movie_nights_provider.dart';
+import 'providers/social_post_provider.dart';
 
 // Screens (aliased to avoid name collisions with placeholder widgets below)
 import 'screens/home/home_screen.dart' as hs;
@@ -151,9 +153,10 @@ class _AppRootState extends State<AppRoot> {
         ChangeNotifierProvider(create: (_) => FriendRequestsProvider(SocialService(client: _client))),
         ChangeNotifierProvider(create: (_) => RecommendationsProvider(MovieService(client: _client))),
         ChangeNotifierProvider(create: (_) => SocialStatsProvider(SocialService(client: _client))),
-        ChangeNotifierProvider(create: (_) => SocialPostProvider(SocialService(client: _client))),
+        ChangeNotifierProvider(create: (_) => ReviewsProvider(SocialService(client: _client))),
         ChangeNotifierProvider(create: (_) => UserSearchProvider(SocialService(client: _client))),
         ChangeNotifierProvider(create: (_) => MovieNightsProvider(SocialService(client: _client))),
+        ChangeNotifierProvider(create: (_) => SocialPostProvider(SocialService(client: _client))),
       ],
       child: Builder(
         builder: (context) {
@@ -864,7 +867,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 class _AuthApi {
   static final Dio _dio = Dio(
     BaseOptions(
-      baseUrl: (dotenv.env['API_BASE_URL'] ?? 'http://localhost:8000/api').toString(),
+      baseUrl: Env.apiBaseUrl,
       connectTimeout: const Duration(seconds: 10),
       receiveTimeout: const Duration(seconds: 15),
       headers: {'Content-Type': 'application/json'},
@@ -877,7 +880,7 @@ class _AuthApi {
     final payload = isEmail
         ? {'email': identifier, 'password': password}
         : {'username': identifier, 'password': password};
-    final res = await _dio.post('/auth/login/', data: payload);
+    final res = await _dio.post('auth/login/', data: payload);
     if (res.data is Map<String, dynamic>) {
       return res.data as Map<String, dynamic>;
     }
@@ -886,7 +889,7 @@ class _AuthApi {
 
   static Future<void> register({required String username, required String email, required String password}) async {
     final payload = {'username': username, 'email': email, 'password': password};
-    await _dio.post('/auth/register/', data: payload);
+    await _dio.post('auth/register/', data: payload);
   }
 }
 

@@ -23,12 +23,13 @@ class Endpoints {
   static String friendRequestDetail(int id) => 'social/friend-requests/$id/';
   static const usersByGenre = 'social/users-by-genre/';
   static String socialStats(String imdbId) => 'social/stats/$imdbId/';
-  static const generateSocialPost = 'social/generate-post/';
+  static const socialGenerate = 'social/generate/';
 
   // Movie Nights
   static const movieNights = 'social/movie-nights/';
   static String movieNightDetail(int id) => 'social/movie-nights/$id/';
   static String movieNightJoin(int id) => 'social/movie-nights/$id/join/';
+  static String movieNightInvite(int id) => 'social/movie-nights/$id/invite/';
   static String movieNightVote(int id) => 'social/movie-nights/$id/vote/';
 
   // AI

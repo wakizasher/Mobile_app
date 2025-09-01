@@ -11,6 +11,7 @@ from .serializers import (
     NotificationSerializer,
     NotificationGenerateSerializer,
     NotificationBulkCreateSerializer,
+    NotificationBulkPushSerializer,
 )
 from .services import (
     push_notify,
@@ -148,4 +149,59 @@ class NotificationBulkCreateView(APIView):
                 ).data,
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+class NotificationBulkPushView(APIView):
+    """Send push notifications to multiple users.
+
+    Request body:
+    - recipients: [{ user_id, device_token }]
+    - title: string
+    - body: string
+    - data: optional JSON
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = NotificationBulkPushSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        recipients = serializer.validated_data["recipients"]
+        title = serializer.validated_data["title"]
+        body = serializer.validated_data["body"]
+        data_payload = serializer.validated_data.get("data") or {}
+
+        results = []
+        created = []
+        for rec in recipients:
+            uid = rec["user_id"]
+            token = rec["device_token"]
+            delivered = False
+            if token:
+                delivered = push_notify(
+                    device_token=token,
+                    title=title,
+                    body=body,
+                    data=data_payload,
+                )
+            notif = Notification.objects.create(
+                user_id=uid,
+                title=title,
+                body=body,
+                data=data_payload,
+                delivered=delivered,
+            )
+            created.append(notif)
+            results.append({"user_id": uid, "delivered": delivered})
+
+        return Response(
+            {
+                "count": len(created),
+                "results": results,
+                "notifications": NotificationSerializer(
+                    created,
+                    many=True,
+                ).data,
+            }
         )

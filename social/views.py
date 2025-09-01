@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from django.db.models import Q
+from django.db.models import Q, Count
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from datetime import timedelta
@@ -25,11 +25,17 @@ from .models import (
 )
 from .serializers import (
     FavoriteSerializer,
+    FavoriteSimpleSerializer,
+    FavoriteWithUserSerializer,
     LikeToggleSerializer,
+    LikeSimpleSerializer,
+    LikeWithUserSerializer,
     ReviewSerializer,
+    ReviewActivitySerializer,
     ShareSerializer,
     SocialStatsSerializer,
     SocialPostGenerateSerializer,
+    TrendingUsersInputSerializer,
     FriendshipSerializer,
     FriendRequestSerializer,
     MovieNightSerializer,
@@ -41,6 +47,7 @@ from notifications.services import (
     gemini_generate_social_posts,
 )
 from notifications.models import Notification
+from users.serializers import UserSerializer
 
 logger = logging.getLogger(__name__)
 
@@ -302,6 +309,17 @@ class FriendRequestUpdateView(generics.UpdateAPIView):
         serializer = self.get_serializer(instance)
         return Response(serializer.data)
 
+    def delete(self, request, *args, **kwargs):
+        """Allow the sender to cancel/remove their friend request.
+
+        Only `from_user` can delete. Recipients cannot delete the request here.
+        """
+        instance: FriendRequest = self.get_object()
+        if instance.from_user != request.user:
+            raise PermissionDenied("Only the sender can delete this request.")
+        instance.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class FriendshipListView(generics.ListAPIView):
     """List current user's friends."""
@@ -327,17 +345,31 @@ class MovieNightListCreateView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
+        user = self.request.user
+        visible_statuses = [
+            MovieNightParticipant.STATUS_INVITED,
+            MovieNightParticipant.STATUS_ACCEPTED,
+            MovieNightParticipant.STATUS_MAYBE,
+        ]
         return (
-            MovieNight.objects.all()
+            MovieNight.objects.filter(
+                Q(organizer=user)
+                | Q(
+                    participants__user=user,
+                    participants__status__in=visible_statuses,
+                )
+            )
             .select_related("organizer")
             .prefetch_related("participants__user")
             .order_by("-created_at")
+            .distinct()
         )
 
     def get_serializer_context(self):
         ctx = super().get_serializer_context()
         ctx.update({"request": self.request})
         return ctx
+
 
 
 class MovieNightDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -348,11 +380,30 @@ class MovieNightDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     serializer_class = MovieNightSerializer
     permission_classes = [permissions.IsAuthenticated]
-    queryset = (
-        MovieNight.objects.all()
-        .select_related("organizer")
-        .prefetch_related("participants__user")
-    )
+    def get_queryset(self):
+        user = self.request.user
+        visible_statuses = [
+            MovieNightParticipant.STATUS_INVITED,
+            MovieNightParticipant.STATUS_ACCEPTED,
+            MovieNightParticipant.STATUS_MAYBE,
+        ]
+        return (
+            MovieNight.objects.filter(
+                Q(organizer=user)
+                | Q(
+                    participants__user=user,
+                    participants__status__in=visible_statuses,
+                )
+            )
+            .select_related("organizer")
+            .prefetch_related(
+                "participants__user",
+                # Optimize votes payload for detail view (serializer may conditionally include)
+                "votes__user",
+                "votes__movie",
+            )
+            .distinct()
+        )
 
     def perform_update(self, serializer):
         obj: MovieNight = self.get_object()
@@ -365,9 +416,39 @@ class MovieNightDetailView(generics.RetrieveUpdateDestroyAPIView):
             raise PermissionDenied("Only the organizer can delete this movie night.")
         return super().perform_destroy(instance)
 
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        obj: MovieNight | None = None
+        try:
+            obj = self.get_object()
+        except Exception:
+            obj = None
+        include_votes = False
+        if obj is not None:
+            is_organizer = obj.organizer_id == self.request.user.id
+            is_accepted = MovieNightParticipant.objects.filter(
+                movie_night=obj,
+                user=self.request.user,
+                status=MovieNightParticipant.STATUS_ACCEPTED,
+            ).exists()
+            include_votes = bool(is_organizer or is_accepted)
+        ctx.update({"request": self.request, "include_votes": include_votes})
+        return ctx
+
 
 class MovieNightParticipantView(APIView):
-    """Join or leave a movie night for the current user."""
+    """Join/request or leave/cancel participation for the current user.
+
+    POST behavior:
+    - If user is invited (invited/maybe), accept the invite (status -> accepted) with capacity check.
+    - If user already accepted, no-op.
+    - If no participation exists, create a join request (status=requested).
+    - If participation exists as requested, return current object (idempotent).
+
+    DELETE behavior:
+    - If status=requested, cancel the request (delete row).
+    - Otherwise, remove participation (leave the movie night), except organizer cannot leave.
+    """
 
     permission_classes = [permissions.IsAuthenticated]
 
@@ -378,26 +459,58 @@ class MovieNightParticipantView(APIView):
                 {"detail": "Movie night not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        # capacity check
-        if movie_night.max_participants:
-            accepted_count = MovieNightParticipant.objects.filter(
-                movie_night=movie_night,
-                status=MovieNightParticipant.STATUS_ACCEPTED,
-            ).count()
-            if accepted_count >= movie_night.max_participants:
-                return Response(
-                    {"detail": "Movie night is full."},
-                    status=status.HTTP_400_BAD_REQUEST,
+        # Organizer is already added on create; just return current participation
+        if movie_night.organizer_id == request.user.id:
+            participant = MovieNightParticipant.objects.filter(
+                movie_night=movie_night, user=request.user
+            ).first()
+            if not participant:
+                participant = MovieNightParticipant.objects.create(
+                    movie_night=movie_night,
+                    user=request.user,
+                    status=MovieNightParticipant.STATUS_ACCEPTED,
                 )
-        participant, _ = MovieNightParticipant.objects.get_or_create(
-            movie_night=movie_night,
-            user=request.user,
-            defaults={"status": MovieNightParticipant.STATUS_ACCEPTED},
-        )
-        if participant.status != MovieNightParticipant.STATUS_ACCEPTED:
+            return Response(MovieNightParticipantSerializer(participant).data)
+
+        participant = MovieNightParticipant.objects.filter(
+            movie_night=movie_night, user=request.user
+        ).first()
+
+        # Accept invite if invited/maybe
+        if participant and participant.status in (
+            MovieNightParticipant.STATUS_INVITED,
+            MovieNightParticipant.STATUS_MAYBE,
+        ):
+            # capacity check applies when moving to accepted
+            if movie_night.max_participants:
+                accepted_count = MovieNightParticipant.objects.filter(
+                    movie_night=movie_night,
+                    status=MovieNightParticipant.STATUS_ACCEPTED,
+                ).count()
+                if accepted_count >= movie_night.max_participants:
+                    return Response(
+                        {"detail": "Movie night is full."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
             participant.status = MovieNightParticipant.STATUS_ACCEPTED
             participant.save(update_fields=["status"])
-        return Response(MovieNightParticipantSerializer(participant).data)
+            return Response(MovieNightParticipantSerializer(participant).data)
+
+        # Already accepted -> no-op
+        if participant and participant.status == MovieNightParticipant.STATUS_ACCEPTED:
+            return Response(MovieNightParticipantSerializer(participant).data)
+
+        # Already requested -> idempotent
+        if participant and participant.status == MovieNightParticipant.STATUS_REQUESTED:
+            return Response(MovieNightParticipantSerializer(participant).data)
+
+        # Otherwise, create a join request
+        participant = MovieNightParticipant.objects.create(
+            movie_night=movie_night,
+            user=request.user,
+            status=MovieNightParticipant.STATUS_REQUESTED,
+        )
+        return Response(MovieNightParticipantSerializer(participant).data, status=status.HTTP_201_CREATED)
 
     def delete(self, request, pk: int):
         movie_night = MovieNight.objects.filter(pk=pk).first()
@@ -408,8 +521,62 @@ class MovieNightParticipantView(APIView):
         ).first()
         if not participant:
             return Response(status=status.HTTP_204_NO_CONTENT)
+        # Organizer cannot leave their own movie night
+        if movie_night.organizer_id == request.user.id:
+            raise PermissionDenied("Organizer cannot leave their own movie night.")
         participant.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class MovieNightInviteView(APIView):
+    """Organizer invites a user to a movie night (creates or updates participation).
+
+    Body: {"user_id": <int>}
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk: int):
+        movie_night = MovieNight.objects.filter(pk=pk).first()
+        if not movie_night:
+            return Response(
+                {"detail": "Movie night not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if movie_night.organizer_id != request.user.id:
+            raise PermissionDenied("Only the organizer can invite participants.")
+
+        try:
+            user_id = int(request.data.get("user_id"))
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "user_id is required and must be an integer."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Organizer cannot invite themselves (they are already accepted)
+        if user_id == request.user.id:
+            participant = MovieNightParticipant.objects.filter(
+                movie_night=movie_night, user=request.user
+            ).first()
+            if not participant:
+                participant = MovieNightParticipant.objects.create(
+                    movie_night=movie_night,
+                    user=request.user,
+                    status=MovieNightParticipant.STATUS_ACCEPTED,
+                )
+            return Response(MovieNightParticipantSerializer(participant).data)
+
+        participant, created = MovieNightParticipant.objects.get_or_create(
+            movie_night=movie_night,
+            user_id=user_id,
+            defaults={"status": MovieNightParticipant.STATUS_INVITED},
+        )
+        if not created and participant.status == MovieNightParticipant.STATUS_REQUESTED:
+            # Upgrade a join request to an invite
+            participant.status = MovieNightParticipant.STATUS_INVITED
+            participant.save(update_fields=["status"])
+        return Response(MovieNightParticipantSerializer(participant).data)
 
 
 class MovieNightVoteView(generics.CreateAPIView):
@@ -421,6 +588,17 @@ class MovieNightVoteView(generics.CreateAPIView):
     def get_serializer_context(self):
         ctx = super().get_serializer_context()
         movie_night = MovieNight.objects.filter(pk=self.kwargs.get("pk")).first()
+        if not movie_night:
+            raise PermissionDenied("Movie night not found.")
+        # Only organizer or accepted participants can vote
+        is_organizer = movie_night.organizer_id == self.request.user.id
+        is_accepted = MovieNightParticipant.objects.filter(
+            movie_night=movie_night,
+            user=self.request.user,
+            status=MovieNightParticipant.STATUS_ACCEPTED,
+        ).exists()
+        if not (is_organizer or is_accepted):
+            raise PermissionDenied("You are not allowed to vote in this movie night.")
         ctx.update({"request": self.request, "movie_night": movie_night})
         return ctx
 
@@ -592,3 +770,251 @@ class FriendSuggestionsView(APIView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+
+# ---- New Social Endpoints ----
+
+
+class RecentFavoritesView(generics.ListAPIView):
+    """List recent favorites across all users within the last X minutes.
+
+    Query params:
+    - minutes: integer window (default 60)
+    """
+
+    serializer_class = FavoriteWithUserSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        try:
+            minutes = int(self.request.query_params.get("minutes", 60))
+        except (TypeError, ValueError):
+            minutes = 60
+        cutoff = timezone.now() - timedelta(minutes=max(1, minutes))
+        return (
+            Favorite.objects.filter(created_at__gte=cutoff)
+            .select_related("user", "movie")
+            .order_by("-created_at")
+        )
+
+
+class UsersInterestedInTrendingView(APIView):
+    """Return users who engaged with the provided trending movies.
+
+    POST body: see `TrendingUsersInputSerializer`.
+    Engagement includes favorites, likes, or reviews for the movies.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        ser = TrendingUsersInputSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        imdb_ids = ser.get_imdb_ids()
+        if not imdb_ids:
+            return Response({"users": [], "count": 0})
+
+        User = get_user_model()
+        q = (
+            Q(favorites__movie__imdb_id__in=imdb_ids)
+            | Q(likes__movie__imdb_id__in=imdb_ids)
+            | Q(reviews__movie__imdb_id__in=imdb_ids)
+        )
+
+        users_qs = (
+            User.objects.filter(q)
+            .annotate(
+                favs=Count(
+                    "favorites",
+                    filter=Q(favorites__movie__imdb_id__in=imdb_ids),
+                    distinct=True,
+                ),
+                likes=Count(
+                    "likes",
+                    filter=Q(likes__movie__imdb_id__in=imdb_ids),
+                    distinct=True,
+                ),
+                revs=Count(
+                    "reviews",
+                    filter=Q(reviews__movie__imdb_id__in=imdb_ids),
+                    distinct=True,
+                ),
+            )
+            .order_by("-favs", "-likes", "-revs")
+            .distinct()
+        )
+
+        data = UserSerializer(users_qs, many=True).data
+        return Response({"users": data, "count": len(data)})
+
+
+class ActiveUsersView(generics.ListAPIView):
+    """List users active in the last 7 days (favorites, likes, reviews)."""
+
+    serializer_class = UserSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        cutoff = timezone.now() - timedelta(days=7)
+        User = get_user_model()
+        return (
+            User.objects.filter(
+                Q(favorites__created_at__gte=cutoff)
+                | Q(likes__created_at__gte=cutoff)
+                | Q(reviews__created_at__gte=cutoff)
+            )
+            .annotate(
+                favs=Count(
+                    "favorites",
+                    filter=Q(favorites__created_at__gte=cutoff),
+                    distinct=True,
+                ),
+                likes=Count(
+                    "likes",
+                    filter=Q(likes__created_at__gte=cutoff),
+                    distinct=True,
+                ),
+                revs=Count(
+                    "reviews",
+                    filter=Q(reviews__created_at__gte=cutoff),
+                    distinct=True,
+                ),
+            )
+            .order_by("-favs", "-likes", "-revs")
+            .distinct()
+        )
+
+
+class UserMovieHistoryView(APIView):
+    """Summarize a user's movie history: favorites, likes, and reviews.
+
+    Path param: user_id
+    Query param: limit (default 20)
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, user_id: int):
+        try:
+            limit = int(request.query_params.get("limit", 20))
+        except (TypeError, ValueError):
+            limit = 20
+        limit = max(1, min(limit, 100))
+
+        fav_qs = (
+            Favorite.objects.filter(user_id=user_id)
+            .select_related("movie")
+            .order_by("-created_at")[:limit]
+        )
+        like_qs = (
+            Like.objects.filter(user_id=user_id)
+            .select_related("movie")
+            .order_by("-created_at")[:limit]
+        )
+        rev_qs = (
+            Review.objects.filter(user_id=user_id)
+            .select_related("movie", "user")
+            .order_by("-created_at")[:limit]
+        )
+
+        payload = {
+            "user_id": user_id,
+            "counts": {
+                "favorites": Favorite.objects.filter(user_id=user_id).count(),
+                "likes": Like.objects.filter(user_id=user_id).count(),
+                "reviews": Review.objects.filter(user_id=user_id).count(),
+            },
+            "recent": {
+                "favorites": FavoriteSimpleSerializer(fav_qs, many=True).data,
+                "likes": LikeSimpleSerializer(like_qs, many=True).data,
+                "reviews": ReviewActivitySerializer(rev_qs, many=True).data,
+            },
+        }
+        return Response(payload)
+
+
+class FriendsActivityView(APIView):
+    """Return friends' recent activity (favorites, likes, reviews).
+
+    Path param: user_id
+    Query params:
+    - minutes: window size (default 1440)
+    - limit: max items to return (default 50)
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, user_id: int):
+        try:
+            minutes = int(request.query_params.get("minutes", 1440))
+        except (TypeError, ValueError):
+            minutes = 1440
+        try:
+            limit = int(request.query_params.get("limit", 50))
+        except (TypeError, ValueError):
+            limit = 50
+        limit = max(1, min(limit, 200))
+
+        cutoff = timezone.now() - timedelta(minutes=max(1, minutes))
+        friend_ids = list(
+            Friendship.objects.filter(user_id=user_id).values_list(
+                "friend_id", flat=True
+            )
+        )
+        if not friend_ids:
+            return Response({"activities": [], "count": 0})
+
+        favs = list(
+            Favorite.objects.filter(
+                user_id__in=friend_ids, created_at__gte=cutoff
+            )
+            .select_related("user", "movie")
+            .order_by("-created_at")[: limit * 2]
+        )
+        likes = list(
+            Like.objects.filter(user_id__in=friend_ids, created_at__gte=cutoff)
+            .select_related("user", "movie")
+            .order_by("-created_at")[: limit * 2]
+        )
+        revs = list(
+            Review.objects.filter(user_id__in=friend_ids, created_at__gte=cutoff)
+            .select_related("user", "movie")
+            .order_by("-created_at")[: limit * 2]
+        )
+
+        activities = []
+        for f in favs:
+            activities.append(
+                {
+                    "type": "favorite",
+                    "created_at": f.created_at,
+                    "data": FavoriteWithUserSerializer(f).data,
+                }
+            )
+        for like_obj in likes:
+            activities.append(
+                {
+                    "type": "like",
+                    "created_at": like_obj.created_at,
+                    "data": LikeWithUserSerializer(like_obj).data,
+                }
+            )
+        for r in revs:
+            activities.append(
+                {
+                    "type": "review",
+                    "created_at": r.created_at,
+                    "data": ReviewActivitySerializer(r).data,
+                }
+            )
+
+        # Sort by created_at desc and trim
+        activities.sort(key=lambda x: x.get("created_at"), reverse=True)
+        activities = activities[:limit]
+
+        # Convert datetime to isoformat for JSON
+        for item in activities:
+            dt = item.get("created_at")
+            item["created_at"] = dt.isoformat() if dt else None
+
+        return Response({"activities": activities, "count": len(activities)})

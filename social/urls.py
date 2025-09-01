@@ -14,9 +14,15 @@ from .views import (
     MovieNightListCreateView,
     MovieNightDetailView,
     MovieNightParticipantView,
+    MovieNightInviteView,
     MovieNightVoteView,
     FriendSuggestionsView,
     UsersByGenreView,
+    RecentFavoritesView,
+    UsersInterestedInTrendingView,
+    ActiveUsersView,
+    UserMovieHistoryView,
+    FriendsActivityView,
 )
 
 urlpatterns = [
@@ -55,10 +61,11 @@ urlpatterns = [
         ReviewSentimentAnalysisView.as_view(),
         name="review_sentiment_analysis",
     ),
+    # AI Social Post Generation
     path(
-        "generate-post/",
+        "generate/",
         GenerateSocialPostView.as_view(),
-        name="generate_social_post",
+        name="social_generate",
     ),
     # Friend system
     path(
@@ -93,6 +100,11 @@ urlpatterns = [
         name="movie_night_join",
     ),
     path(
+        "movie-nights/<int:pk>/invite/",
+        MovieNightInviteView.as_view(),
+        name="movie_night_invite",
+    ),
+    path(
         "movie-nights/<int:pk>/vote/",
         MovieNightVoteView.as_view(),
         name="movie_night_vote",
@@ -106,5 +118,31 @@ urlpatterns = [
         "users-by-genre/",
         UsersByGenreView.as_view(),
         name="users_by_genre",
+    ),
+    # New social endpoints
+    path(
+        "recent-favorites/",
+        RecentFavoritesView.as_view(),
+        name="recent_favorites",
+    ),
+    path(
+        "users-interested-in-trending/",
+        UsersInterestedInTrendingView.as_view(),
+        name="users_interested_in_trending",
+    ),
+    path(
+        "active-users/",
+        ActiveUsersView.as_view(),
+        name="active_users",
+    ),
+    path(
+        "user-movie-history/<int:user_id>/",
+        UserMovieHistoryView.as_view(),
+        name="user_movie_history",
+    ),
+    path(
+        "friends/<int:user_id>/activity/",
+        FriendsActivityView.as_view(),
+        name="friends_activity",
     ),
 ]

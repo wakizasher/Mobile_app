@@ -166,11 +166,13 @@ class MovieNightParticipant(models.Model):
     STATUS_ACCEPTED = "accepted"
     STATUS_DECLINED = "declined"
     STATUS_MAYBE = "maybe"
+    STATUS_REQUESTED = "requested"
     STATUS_CHOICES = (
         (STATUS_INVITED, "Invited"),
         (STATUS_ACCEPTED, "Accepted"),
         (STATUS_DECLINED, "Declined"),
         (STATUS_MAYBE, "Maybe"),
+        (STATUS_REQUESTED, "Requested"),
     )
 
     movie_night = models.ForeignKey(

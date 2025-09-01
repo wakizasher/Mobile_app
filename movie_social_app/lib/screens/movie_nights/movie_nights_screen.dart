@@ -7,6 +7,9 @@ import '../../models/movie_night.dart';
 import 'dart:async';
 import '../../providers/movies_provider.dart';
 import '../../models/movie.dart';
+import '../../providers/user_search_provider.dart';
+import '../../models/user.dart';
+import 'movie_night_detail_screen.dart';
 
 class MovieNightsScreen extends StatelessWidget {
   const MovieNightsScreen({super.key});
@@ -23,6 +26,7 @@ class MovieNightsScreen extends StatelessWidget {
       ),
     );
   }
+  
 }
 
 class _MovieNightsBody extends StatelessWidget {
@@ -79,7 +83,9 @@ class _NightTile extends StatelessWidget {
   bool _isJoined(BuildContext context) {
     final user = context.read<AuthProvider>().currentUser;
     if (user == null) return false;
-    return night.participants.any((p) => p.user.id == user.id);
+    // Consider "joined" only if organizer or participation is accepted.
+    if (user.id == night.organizer.id) return true;
+    return night.participants.any((p) => p.user.id == user.id && p.status == 'accepted');
   }
 
   @override
@@ -89,10 +95,31 @@ class _NightTile extends StatelessWidget {
     final isJoining = prov.joiningIds.contains(night.id);
     final isLeaving = prov.leavingIds.contains(night.id);
     final color = Theme.of(context).colorScheme;
+    final currentUser = context.read<AuthProvider>().currentUser;
+    final isOrganizer = currentUser != null && currentUser.id == night.organizer.id;
+    // Determine current user's participation status (if any)
+    String? myStatus;
+    if (currentUser != null) {
+      for (final p in night.participants) {
+        if (p.user.id == currentUser.id) {
+          myStatus = p.status;
+          break;
+        }
+      }
+    }
+    final bool isInvitePending = myStatus == 'invited' || myStatus == 'maybe';
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
+      child: InkWell(
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => MovieNightDetailScreen(initial: night),
+            ),
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
@@ -150,18 +177,18 @@ class _NightTile extends StatelessWidget {
                     onPressed: isJoining
                         ? null
                         : () async {
-                            final messenger = ScaffoldMessenger.of(context);
-                            final prov = context.read<MovieNightsProvider>();
-                            await prov.join(night.id);
-                            if (!context.mounted) return;
-                            messenger.showSnackBar(
-                              SnackBar(content: Text(prov.error == null ? 'Joined movie night' : 'Failed to join movie night')),
-                            );
-                          },
+                          final messenger = ScaffoldMessenger.of(context);
+                          final prov = context.read<MovieNightsProvider>();
+                          await prov.join(night.id);
+                          if (!context.mounted) return;
+                          messenger.showSnackBar(
+                            SnackBar(content: Text(prov.error == null ? (isInvitePending ? 'Invitation accepted' : 'Join requested') : 'Failed to join movie night')),
+                          );
+                        },
                     icon: isJoining
                         ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
                         : const Icon(Icons.event_available),
-                    label: Text(isJoining ? 'Joining...' : 'Join'),
+                    label: Text(isJoining ? (isInvitePending ? 'Accepting...' : 'Joining...') : (isInvitePending ? 'Accept' : 'Join')),
                   )
                 else
                   OutlinedButton.icon(
@@ -200,12 +227,21 @@ class _NightTile extends StatelessWidget {
                   icon: const Icon(Icons.how_to_vote),
                   label: const Text('Vote'),
                 ),
+                if (isOrganizer) ...[
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: () => _showInviteDialog(context, night),
+                    icon: const Icon(Icons.person_add_alt),
+                    label: const Text('Invite'),
+                  ),
+                ],
               ],
             ),
           ],
         ),
       ),
-    );
+    ),
+  );
   }
 }
 
@@ -241,6 +277,116 @@ class _EmptyState extends StatelessWidget {
       ),
     );
   }
+}
+
+void _showInviteDialog(BuildContext context, MovieNight night) {
+  final searchCtrl = TextEditingController();
+  // reset previous search state
+  context.read<UserSearchProvider>().clear();
+
+  showDialog(
+    context: context,
+    builder: (context) {
+      Timer? debouncer;
+      final invitedIds = <int>{};
+      final invitingIds = <int>{};
+
+      void onChanged(String q) {
+        debouncer?.cancel();
+        debouncer = Timer(const Duration(milliseconds: 300), () {
+          context.read<UserSearchProvider>().search(q);
+        });
+      }
+
+      return StatefulBuilder(
+        builder: (context, setState) {
+          final usersProv = context.watch<UserSearchProvider>();
+          final hasQuery = searchCtrl.text.trim().isNotEmpty;
+          return AlertDialog(
+            title: const Text('Invite friends'),
+            content: SizedBox(
+              width: 520,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: searchCtrl,
+                    onChanged: (q) {
+                      setState(() {});
+                      onChanged(q);
+                    },
+                    decoration: const InputDecoration(
+                      labelText: 'Search users',
+                      hintText: 'Type a name or @username',
+                      prefixIcon: Icon(Icons.search),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 200),
+                    child: !hasQuery
+                        ? const Text('Start typing to search users')
+                        : usersProv.loading
+                            ? const SizedBox(height: 64, child: Center(child: CircularProgressIndicator()))
+                            : usersProv.results.isEmpty
+                                ? const Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 12),
+                                    child: Text('No users found'),
+                                  )
+                                : ConstrainedBox(
+                                    constraints: const BoxConstraints(maxHeight: 320),
+                                    child: ListView.separated(
+                                      shrinkWrap: true,
+                                      itemCount: usersProv.results.length,
+                                      separatorBuilder: (_, __) => const Divider(height: 1),
+                                      itemBuilder: (context, i) {
+                                        final AppUser u = usersProv.results[i];
+                                        final alreadyParticipant = night.participants.any((p) => p.user.id == u.id);
+                                        final isSelf = context.read<AuthProvider>().currentUser?.id == u.id;
+                                        final isInvited = invitedIds.contains(u.id) || alreadyParticipant;
+                                        final isInviting = invitingIds.contains(u.id);
+                                        return ListTile(
+                                          leading: const CircleAvatar(child: Icon(Icons.person)),
+                                          title: Text(u.username),
+                                          subtitle: u.email != null ? Text(u.email!) : null,
+                                          trailing: OutlinedButton(
+                                            onPressed: (isInvited || isInviting || isSelf)
+                                                ? null
+                                                : () async {
+                                                    setState(() => invitingIds.add(u.id));
+                                                    final ok = await context.read<MovieNightsProvider>().invite(id: night.id, userId: u.id);
+                                                    if (!context.mounted) return;
+                                                    setState(() {
+                                                      invitingIds.remove(u.id);
+                                                      if (ok) invitedIds.add(u.id);
+                                                    });
+                                                    final messenger = ScaffoldMessenger.of(context);
+                                                    messenger.showSnackBar(
+                                                      SnackBar(content: Text(ok ? 'Invite sent to @${u.username}' : 'Failed to invite @${u.username}')),
+                                                    );
+                                                  },
+                                            child: Text(isInvited
+                                                ? 'Invited'
+                                                : isInviting
+                                                    ? 'Inviting...'
+                                                    : 'Invite'),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close')),
+            ],
+          );
+        },
+      );
+    },
+  );
 }
 
 void _showVoteDialog(BuildContext context, int nightId) {
