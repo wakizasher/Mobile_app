@@ -1,0 +1,153 @@
+{
+  "name": "Friend Recommendation Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "a0ec4e88-718c-480d-af79-e51c39d94acc",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/api/social/favorites/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "9b385de1-313f-48fe-9a6b-16d7c13037ad",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "8rDyuOpv91jehHJE",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const inputData = $input.all();\nconst responseData = inputData[0].json;\n\n// Extract the results array - this contains all the movies\nconst movies = responseData.results || [];\n\nconst preferences = movies.map(item => {\n  // Access the nested movie object and its genre\n  const movie = item.movie || item;\n  return {\n    genres: movie.genre ? movie.genre.split(', ') : [],\n    year: movie.year ? parseInt(movie.year) : 0\n  };\n});\n\nconst allGenres = preferences.flatMap(p => p.genres);\nconst validYears = preferences.filter(p => p.year > 0).map(p => p.year);\n\nreturn [{\n  json: {\n    preferred_genres: allGenres,\n    avg_year: validYears.length > 0 ? Math.round(validYears.reduce((a, b) => a + b, 0) / validYears.length) : 0,\n    debug_info: {\n      total_movies: movies.length,\n      movies_with_genres: preferences.filter(p => p.genres.length > 0).length,\n      sample_genres: preferences.slice(0, 2).map(p => p.genres)\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        0
+      ],
+      "id": "181b0266-b436-445d-ac94-3e1545526f2c",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "jsCode": "const currentUserPrefs = $input.first().json;\n\n// Mock similar users analysis (you'd need real user data for full implementation)\nconst potentialFriends = [\n  {\n    user_id: 3,\n    username: \"user3\", \n    shared_genres: [\"Action\", \"Adventure\", \"Comedy\"],\n    similarity_score: 0.85\n  },\n  {\n    user_id: 4,\n    username: \"user4\",\n    shared_genres: [\"Action\", \"Sci-Fi\"],\n    similarity_score: 0.72\n  }\n];\n\n// Filter and rank by similarity\nconst recommendations = potentialFriends\n  .filter(user => user.similarity_score > 0.7)\n  .slice(0, 3); // Top 3 recommendations\n\nreturn [{\n  json: {\n    user_preferences: currentUserPrefs,\n    friend_recommendations: recommendations\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        0
+      ],
+      "id": "a194a97f-1d9a-48c8-89fb-da2761b55993",
+      "name": "Code1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/api/social/friend-suggestions/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        832,
+        0
+      ],
+      "id": "4e27fa60-01bf-460b-b172-3a6102961666",
+      "name": "HTTP Request1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "8rDyuOpv91jehHJE",
+          "name": "Header Auth account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Code1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "9ef805cf-b5a0-4363-8685-2f7593a1c154",
+  "meta": {
+    "instanceId": "25629ae478ac74462ccdd823a86d9d172c10c5467aba5236b4d5b5cd63c2dc92"
+  },
+  "id": "6xGkbkuoumDr0bFa",
+  "tags": []
+}

@@ -1,0 +1,317 @@
+{
+  "name": "Popular Movie Alerts",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "caf2e8e2-4480-4ac8-9627-ee79db2ae6d8",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/api/movies/popular/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "9a477c4c-dec8-49f6-9c1a-c8204d909c65",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "8rDyuOpv91jehHJE",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "4ff97db5-9f80-4b86-b680-54a0d22ca277",
+              "name": "current_movies",
+              "value": "={{ $json.results }}",
+              "type": "string"
+            },
+            {
+              "id": "3a77adda-589c-4fc6-9833-7082c79b5ceb",
+              "name": "previous_movies",
+              "value": "={{ $workflow.static_data.previous_movies || [] }}",
+              "type": "string"
+            },
+            {
+              "id": "68f99b36-c62e-44ac-ac61-d4ae81551dcf",
+              "name": "timestamp",
+              "value": "={{ new Date().toISOString() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        416,
+        0
+      ],
+      "id": "36fb7456-1ced-49aa-96bf-3bfed344a8a6",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get current and previous movies data from the Set node\nconst inputData = $input.first().json;\nconst currentMovies = inputData.current_movies || [];\nconst previousMovies = inputData.previous_movies || [];\nconst timestamp = inputData.timestamp;\n\n// Debug: Check what we're working with\nconsole.log('Current movies type:', typeof currentMovies);\nconsole.log('Current movies length:', Array.isArray(currentMovies) ? currentMovies.length : 'Not an array');\nconsole.log('Previous movies type:', typeof previousMovies);\n\n// Ensure we have arrays to work with\nconst currentMovieArray = Array.isArray(currentMovies) ? currentMovies : [];\nconst previousMovieArray = Array.isArray(previousMovies) ? previousMovies : [];\n\n// Helper function to find movie by imdb_id in array\nfunction findMovie(movies, imdbId) {\n  return movies.find(movie => movie.imdb_id === imdbId);\n}\n\n// Calculate popularity changes and identify trending movies\nconst trendingMovies = [];\nconst popularityChanges = [];\n\ncurrentMovieArray.forEach(currentMovie => {\n  const imdbId = currentMovie.imdb_id;\n  const previousMovie = findMovie(previousMovieArray, imdbId);\n  \n  // Calculate current popularity score (likes + favorites)\n  const currentScore = (currentMovie.likes_count || 0) + (currentMovie.favorites_count || 0);\n  \n  if (previousMovie) {\n    // Movie existed before - calculate change\n    const previousScore = (previousMovie.likes_count || 0) + (previousMovie.favorites_count || 0);\n    const change = currentScore - previousScore;\n    const changePercent = previousScore > 0 ? (change / previousScore) * 100 : 0;\n    \n    popularityChanges.push({\n      imdb_id: imdbId,\n      title: currentMovie.title,\n      previous_score: previousScore,\n      current_score: currentScore,\n      change: change,\n      change_percent: changePercent,\n      genres: currentMovie.genre ? currentMovie.genre.split(', ') : []\n    });\n    \n    // Consider trending if 20% increase or +3 more interactions\n    if (changePercent >= 20 || change >= 3) {\n      trendingMovies.push({\n        ...currentMovie,\n        popularity_change: change,\n        change_percent: changePercent,\n        genres: currentMovie.genre ? currentMovie.genre.split(', ') : []\n      });\n    }\n  } else {\n    // New movie in popular list - consider all current popular movies as trending for first run\n    if (currentScore >= 1) {\n      trendingMovies.push({\n        ...currentMovie,\n        popularity_change: currentScore,\n        change_percent: 100,\n        is_new: true,\n        genres: currentMovie.genre ? currentMovie.genre.split(', ') : []\n      });\n    }\n  }\n});\n\n// Store current movies for next run\n$workflow.static_data = { \n  previous_movies: currentMovieArray,\n  last_check: timestamp\n};\n\n// Return results\nreturn [{\n  json: {\n    trending_movies: trendingMovies,\n    popularity_changes: popularityChanges,\n    total_current: currentMovieArray.length,\n    total_trending: trendingMovies.length,\n    timestamp: timestamp,\n    debug: {\n      current_type: typeof currentMovies,\n      previous_type: typeof previousMovies\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        592,
+        -64
+      ],
+      "id": "7b78cbdc-fbe9-4c37-91b1-0e4a397f34d4",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "78825eab-9601-4823-96b0-86588b8f216a",
+              "leftValue": "={{ $json.total_trending }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        800,
+        -64
+      ],
+      "id": "436e814a-8885-46a6-a8bb-de22c087d860",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a8f12f0d-6f62-4b32-a1ef-f51c3d02606d",
+              "name": "message",
+              "value": "\"No trending movies found - no notifications sent\"",
+              "type": "string"
+            },
+            {
+              "id": "f09e35eb-1f67-41f3-817e-c0f2282e4a92",
+              "name": "timestamp",
+              "value": "={{ $json.timestamp }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1008,
+        32
+      ],
+      "id": "ebdf4343-1ddb-43fd-8830-6a42acdf86b2",
+      "name": "Edit Fields1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/api/notifications/generate/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"context\": {\n    \"trending_movies\": \"{{ $('Code').first().json.trending_movies }}\",\n    \"user_preferences\": \"{{ $json }}\",\n    \"notification_type\": \"trending_movies\",\n    \"timestamp\": \"{{ $('Code').first().json.timestamp }}\"\n  },\n  \"data\": {\n    \"type\": \"trending_alert\",\n    \"movie_count\": \"{{ $('Code').first().json.total_trending }}\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1216,
+        -160
+      ],
+      "id": "87173b71-bff6-4589-8c17-242d1de0307e",
+      "name": "Sending Notifications",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "8rDyuOpv91jehHJE",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/api/social/users-by-genre/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "genres",
+              "value": "={{ $json.trending_movies.map(m => m.genres).flat().join(',') }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1008,
+        -160
+      ],
+      "id": "0883d842-3e91-47a1-a49a-2fa40bae8f23",
+      "name": "Users by Genre",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "8rDyuOpv91jehHJE",
+          "name": "Header Auth account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Users by Genre",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Users by Genre": {
+      "main": [
+        [
+          {
+            "node": "Sending Notifications",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "c739bfe0-b80c-48fb-85bb-35d59d155e3f",
+  "meta": {
+    "instanceId": "25629ae478ac74462ccdd823a86d9d172c10c5467aba5236b4d5b5cd63c2dc92"
+  },
+  "id": "0gTGcaOPB2aa4cU0",
+  "tags": []
+}
